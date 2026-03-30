@@ -34,6 +34,19 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 # Allowed file types and their max sizes
 ALLOWED_TYPES = {"pdf", "docx", "txt"}
 MAX_FILE_SIZE_MB = 10
+MAX_FILES_PER_USER = 10     
+
+existing = supabase_admin.table("documents")\
+    .select("id", count="exact")\
+    .eq("uploaded_by", str(current_user.id))\
+    .execute()
+
+if (existing.count or 0) >= MAX_FILES_PER_USER:
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=f"Upload limit reached ({MAX_FILES_PER_USER} files max). "
+               f"Delete existing files to upload more."
+    )
 
 
 @router.post(
