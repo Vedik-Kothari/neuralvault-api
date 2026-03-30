@@ -51,14 +51,30 @@ app = FastAPI(
 # CORS = Cross-Origin Resource Sharing
 # Allows the Streamlit frontend (port 8501) to call FastAPI (port 8000)
 # Without this, the browser blocks cross-origin requests.
+# Remove the old CORSMiddleware and replace with this:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
+    max_age=86400,
 )
+
+from fastapi import Request
+from fastapi.responses import Response
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    return Response(
+        content="OK",
+        headers={
+            "Access-Control-Allow-Origin":  "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
 
 
 # ---- Request Logging Middleware ----
