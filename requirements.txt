@@ -1,0 +1,19 @@
+fastapi
+uvicorn[standard]
+supabase
+python-jose[cryptography]
+python-dotenv
+pydantic>=2.7.4
+pydantic-settings
+python-multipart
+httpx
+loguru
+pypdf
+python-docx
+langchain-text-splitters
+anyio
+cryptography
+groq
+langchain-core
+sentence-transformers
+torch --index-url https://download.pytorch.org/whl/cpu
