@@ -36,18 +36,6 @@ ALLOWED_TYPES = {"pdf", "docx", "txt"}
 MAX_FILE_SIZE_MB = 10
 MAX_FILES_PER_USER = 10     
 
-existing = supabase_admin.table("documents")\
-    .select("id", count="exact")\
-    .eq("uploaded_by", str(current_user.id))\
-    .execute()
-
-if (existing.count or 0) >= MAX_FILES_PER_USER:
-    raise HTTPException(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail=f"Upload limit reached ({MAX_FILES_PER_USER} files max). "
-               f"Delete existing files to upload more."
-    )
-
 
 @router.post(
     "/upload",
@@ -61,22 +49,24 @@ async def upload_document(
         description="Comma-separated roles: intern,employee,manager,admin"
     ),
     department: str = Form(default="general"),
-    # require_employee means interns cannot upload documents
     current_user: UserProfile = Depends(require_employee),
 ):
     """
     Upload a document and register it for processing.
-
-    SECURITY CHECKS:
-    1. User must be employee+ (no intern uploads)
-    2. role_access cannot exceed the uploader's own role
-       (managers can't grant admin-only access)
-    3. File type must be pdf/docx/txt
-    4. File size limited to 10MB
-
-    After upload, the document status is 'pending'.
-    The ingestion pipeline (Phase 3) will process it.
     """
+
+    # --- Check upload limit (FIXED: moved inside function) ---
+    existing = supabase_admin.table("documents")\
+        .select("id", count="exact")\
+        .eq("uploaded_by", str(current_user.id))\
+        .execute()
+
+    if (existing.count or 0) >= MAX_FILES_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Upload limit reached ({MAX_FILES_PER_USER} files max). "
+                   f"Delete existing files to upload more."
+        )
 
     # --- Validate file type ---
     filename = file.filename or "unknown"
@@ -112,10 +102,6 @@ async def upload_document(
             detail=f"Invalid role in role_access: {e}"
         )
 
-    # SECURITY: Prevent privilege escalation
-    # A manager cannot tag a document as admin-only
-    # (they could lock themselves out, but more importantly
-    # they shouldn't be able to set access they don't have)
     user_priority_map = {
         RoleType.intern: 1, RoleType.employee: 2,
         RoleType.manager: 3, RoleType.admin: 4
@@ -123,20 +109,17 @@ async def upload_document(
     user_priority = user_priority_map[current_user.role]
 
     min_role_in_access = min(
-    user_priority_map[role] for role in parsed_roles
-)
+        user_priority_map[role] for role in parsed_roles
+    )
 
     if min_role_in_access > user_priority:
         raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"role_access must include at least one role "
-               f"at or below your own role '{current_user.role}'. "
-               f"You cannot create documents only accessible "
-               f"to roles higher than yours."
-    )
-
-        
-        
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"role_access must include at least one role "
+                   f"at or below your own role '{current_user.role}'. "
+                   f"You cannot create documents only accessible "
+                   f"to roles higher than yours."
+        )
 
     # --- Upload file to Supabase Storage ---
     storage_path = f"{current_user.department}/{uuid.uuid4()}/{filename}"
@@ -179,7 +162,6 @@ async def upload_document(
 
     except Exception as e:
         logger.error(f"DB insert failed for {filename}: {e}")
-        # Clean up uploaded file if DB insert fails
         supabase_admin.storage.from_("documents").remove([storage_path])
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -197,18 +179,7 @@ async def list_documents(
     limit: int = 20,
     offset: int = 0,
 ):
-    """
-    Returns documents the current user is allowed to see.
-
-    Note: Even though we filter here in Python, the Supabase
-    query also goes through RLS — double protection.
-    """
     try:
-        # RLS on the documents table handles filtering automatically
-        # We use supabase_admin here for the query but we pass
-        # explicit filters to mirror what RLS would do
-        # (belt and suspenders approach)
-
         result = supabase_admin.table("documents")\
             .select("*", count="exact")\
             .contains("role_access", [current_user.role.value])\
@@ -239,12 +210,7 @@ async def delete_document(
     document_id: str,
     current_user: UserProfile = Depends(get_current_user),
 ):
-    """
-    Deletes a document and all its chunks (CASCADE in DB).
-    Only the uploader or admin can delete.
-    """
     try:
-        # Fetch the document first
         result = supabase_admin.table("documents")\
             .select("*")\
             .eq("id", document_id)\
@@ -259,7 +225,6 @@ async def delete_document(
 
         doc = result.data
 
-        # Authorization check
         is_owner = doc["uploaded_by"] == str(current_user.id)
         is_admin = current_user.role == RoleType.admin
 
@@ -269,13 +234,11 @@ async def delete_document(
                 detail="Only the uploader or admin can delete this document."
             )
 
-        # Delete from storage
         if doc.get("storage_path"):
             supabase_admin.storage\
                 .from_("documents")\
                 .remove([doc["storage_path"]])
 
-        # Delete from DB (CASCADE deletes chunks too)
         supabase_admin.table("documents")\
             .delete()\
             .eq("id", document_id)\
