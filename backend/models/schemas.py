@@ -159,3 +159,38 @@ class ErrorResponse(BaseModel):
     """Standard error format across all endpoints."""
     detail: str
     error_code: Optional[str] = None
+
+
+class ExtractedMetadataResponse(BaseModel):
+    """Response after auto-extracting metadata from a document."""
+    department:    str
+    sensitivity:   str
+    document_type: str
+    role_access:   list[RoleType]
+    topics:        list[str]
+    summary:       str
+    pii_detected:  bool
+    confidence:    float
+    needs_review:  bool
+    review_reason: str
+
+
+class MetadataReviewRequest(BaseModel):
+    """
+    Admin approves or modifies auto-extracted metadata.
+    Sent when human reviews a flagged document.
+    """
+    document_id: str
+    role_access: list[RoleType]
+    department:  str
+    approved:    bool = True
+    notes:       str  = ""
+
+
+class AutoIngestRequest(BaseModel):
+    """
+    Request to upload + auto-tag + ingest in one step.
+    This is the production workflow — no manual metadata.
+    """
+    auto_approve_threshold: float = 0.85
+    department_hint: str = ""   # optional hint from uploader
