@@ -137,26 +137,27 @@ async def ingest_document(document_id: str) -> IngestionResult:
         # Build rows for bulk insert
         rows = []
         for chunk, embedding in zip(chunks, embeddings):
+            doc_metadata = doc.get("metadata") or {}
+
             rows.append({
                 "document_id":  document_id,
                 "content":      chunk.content,
-                "embedding":    embedding,       # 384-dim list of floats
+                "embedding":    embedding,
                 "chunk_index":  chunk.chunk_index,
-
-                # SECURITY: copy access rules from parent document
-                # This is the KEY security decision —
-                # every chunk knows who can see it
                 "role_access":  role_access,
                 "department":   department,
                 "source":       filename,
-
-                # Extra metadata for citations
                 "metadata": {
-                    "char_start": chunk.char_start,
-                    "char_end":   chunk.char_end,
-                    "filename":   filename,
-                }
-            })
+                    "char_start":    chunk.char_start,
+        "char_end":      chunk.char_end,
+        "filename":      filename,
+        # Propagate auto-extracted metadata to chunks
+        "document_type": doc_metadata.get("document_type", "other"),
+        "topics":        doc_metadata.get("topics", []),
+        "sensitivity":   doc_metadata.get("sensitivity", "internal"),
+        "summary":       doc_metadata.get("summary", ""),
+    }
+})
 
         # Insert in batches of 50 (Supabase has request size limits)
         batch_size = 50
